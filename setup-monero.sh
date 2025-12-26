@@ -61,14 +61,15 @@
 #
 #===============================================================================
 
-set -e
+# Don't use set -e - we handle errors explicitly for better user feedback
+# set -e
 
 #===============================================================================
 # SCRIPT VERSION AND UPDATE SETTINGS
 #===============================================================================
 
 # Script version - increment this with each release
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.1.0"
 
 # GitHub repository for updates
 GITHUB_REPO="wattfource/monero-node-installer"
@@ -115,8 +116,10 @@ RPC_PASSWORD=""
 POOL_WALLET_ADDRESS=""
 CREATE_POOL_WALLET="N"
 
-# ZMQ settings (for mining pool block notifications)
-ENABLE_ZMQ="N"
+# Block notification settings (for mining pool)
+ENABLE_ZMQ="N"                 # ZMQ block notifications (can have issues on some systems)
+ENABLE_BLOCKNOTIFY="N"         # blocknotify script (alternative to ZMQ)
+BLOCKNOTIFY_CMD=""             # Command to run on new block
 
 # Installation mode
 SETUP_MODE="fresh"             # fresh, update, reconfigure
@@ -418,35 +421,116 @@ check_disk_space() {
     local available_gb=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
     print_info "Available disk space: ${available_gb}GB"
     
-    local required_gb=200
+    # Check storage type (SSD vs HDD)
+    check_storage_type
+    
+    local required_gb=220
+    local recommended_gb=300
     if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
-        required_gb=70
+        required_gb=80
+        recommended_gb=120
     fi
     
     if [[ $available_gb -lt $required_gb ]]; then
         echo ""
-        print_warning "Less than ${required_gb}GB available!"
+        print_error "Insufficient disk space!"
         if [[ "$BLOCKCHAIN_MODE" == "full" ]]; then
             echo "         Full Monero blockchain requires ~180GB"
+            echo "         Plus ~40GB overhead for database, logs, and growth"
+            echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
             echo "         Consider using a pruned node if space is limited"
         else
             echo "         Pruned Monero blockchain requires ~65GB"
+            echo "         Plus ~15GB overhead for database and growth"
+            echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
         fi
         echo ""
         if ! prompt_yes_no "Continue anyway?" "N"; then
             print_error "Setup aborted due to insufficient disk space"
             exit 1
         fi
+    elif [[ $available_gb -lt $recommended_gb ]]; then
+        echo ""
+        print_warning "Disk space is below recommended (${recommended_gb}GB)"
+        echo "         Current: ${available_gb}GB"
+        echo "         The blockchain grows ~20-30GB per year."
+        echo ""
     fi
 }
 
 check_memory() {
     local total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
     local total_mem_gb=$((total_mem_kb / 1024 / 1024))
-    print_info "Available RAM: ${total_mem_gb}GB"
+    local total_mem_mb=$((total_mem_kb / 1024))
+    print_info "Available RAM: ${total_mem_gb}GB (${total_mem_mb}MB)"
     
     if [[ $total_mem_gb -lt 4 ]]; then
-        print_warning "Less than 4GB RAM detected. Monero may run slowly."
+        print_warning "Less than 4GB RAM detected!"
+        echo "         Monero initial sync requires significant memory."
+        echo "         4GB minimum | 8GB recommended"
+        echo ""
+        echo "         To add swap space if sync is slow or crashes:"
+        echo "           sudo fallocate -l 4G /swapfile"
+        echo "           sudo chmod 600 /swapfile"
+        echo "           sudo mkswap /swapfile"
+        echo "           sudo swapon /swapfile"
+        echo ""
+    elif [[ $total_mem_gb -lt 8 ]]; then
+        print_info "RAM: ${total_mem_gb}GB - sufficient (8GB recommended)"
+    else
+        print_success "RAM: ${total_mem_gb}GB (sufficient)"
+    fi
+}
+
+check_cpu() {
+    local cpu_cores=$(nproc)
+    local cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+    
+    print_info "CPU: ${cpu_model}"
+    print_info "CPU cores: ${cpu_cores}"
+    
+    if [[ $cpu_cores -lt 2 ]]; then
+        print_warning "Only ${cpu_cores} CPU core(s) detected!"
+        echo "         Initial blockchain sync will be very slow."
+        echo "         2 cores minimum | 4 cores recommended"
+    elif [[ $cpu_cores -lt 4 ]]; then
+        print_info "CPU cores: ${cpu_cores} - sufficient (4 recommended for pool)"
+    else
+        print_success "CPU cores: ${cpu_cores} (sufficient)"
+    fi
+}
+
+check_storage_type() {
+    local disk_type="unknown"
+    local root_device=$(df / | awk 'NR==2 {print $1}' | sed 's/[0-9]*$//' | sed 's/p$//')
+    local device_name=$(basename "$root_device")
+    
+    # Try to detect if storage is SSD or HDD
+    if [[ -f "/sys/block/${device_name}/queue/rotational" ]]; then
+        local rotational=$(cat "/sys/block/${device_name}/queue/rotational" 2>/dev/null || echo "1")
+        if [[ "$rotational" == "0" ]]; then
+            disk_type="SSD/NVMe"
+            print_success "Storage type: ${disk_type} (recommended)"
+        else
+            disk_type="HDD (spinning disk)"
+            print_warning "Storage type: ${disk_type}"
+            echo ""
+            echo -e "         ${YELLOW}⚠ WARNING: HDD detected!${NC}"
+            echo "         Monero blockchain sync on HDD is EXTREMELY slow."
+            echo "         Initial sync may take 1-3 WEEKS on spinning disk."
+            echo "         SSD/NVMe is strongly recommended for acceptable performance."
+            echo ""
+            if [[ "$NODE_TYPE" == "pool" ]]; then
+                echo -e "         ${RED}Mining pool nodes REQUIRE SSD for acceptable RPC latency.${NC}"
+                echo ""
+            fi
+            if ! prompt_yes_no "Continue anyway (not recommended)?" "N"; then
+                print_error "Setup aborted - SSD strongly recommended"
+                exit 1
+            fi
+        fi
+    else
+        print_info "Storage type: Could not detect (assuming SSD)"
     fi
 }
 
@@ -704,24 +788,80 @@ configure_network() {
         echo "use an SSH tunnel or reverse proxy."
         echo ""
         
-        print_subsection "ZMQ Block Notifications (Optional)"
+        print_subsection "Block Notifications (Optional)"
         
-        echo "ZMQ provides instant block notifications to pool software."
-        echo "This is optional - without it, pool software polls RPC instead."
+        echo "Mining pools need to know when new blocks arrive to update miner work."
+        echo "Choose a method based on your pool software requirements:"
         echo ""
-        echo -e "${YELLOW}Note:${NC} ZMQ can sometimes fail on certain systems. If you"
-        echo "experience issues, you can disable it and use RPC polling."
+        echo -e "┌─────────────────────────────────────────────────────────────────────┐"
+        echo -e "│  ${CYAN}[1]${NC} ${BOLD}RPC POLLING ONLY${NC} (RECOMMENDED)                                 │"
+        echo -e "│      Most compatible, works with all pool software                  │"
+        echo -e "│      Pool polls get_last_block_header every 1-2 seconds             │"
+        echo -e "├─────────────────────────────────────────────────────────────────────┤"
+        echo -e "│  ${CYAN}[2]${NC} ${BOLD}ENABLE ZMQ${NC}                                                     │"
+        echo -e "│      Instant push notifications (may have issues on some systems)   │"
+        echo -e "│      ZMQ pub: tcp://127.0.0.1:${ZMQ_PORT}                                  │"
+        echo -e "├─────────────────────────────────────────────────────────────────────┤"
+        echo -e "│  ${CYAN}[3]${NC} ${BOLD}ENABLE BLOCKNOTIFY${NC}                                             │"
+        echo -e "│      Run a custom script when new blocks arrive                     │"
+        echo -e "│      Useful for custom integrations                                 │"
+        echo -e "├─────────────────────────────────────────────────────────────────────┤"
+        echo -e "│  ${CYAN}[4]${NC} ${BOLD}ENABLE BOTH${NC}                                                    │"
+        echo -e "│      Enable both ZMQ and blocknotify                                │"
+        echo -e "└─────────────────────────────────────────────────────────────────────┘"
         echo ""
+        echo -ne "${YELLOW}Enter your choice [1-4]:${NC} "
+        read -r notif_choice
         
-        if prompt_yes_no "Enable ZMQ block notifications?" "N"; then
-            ENABLE_ZMQ="Y"
-            echo ""
-            print_success "ZMQ will be enabled on tcp://127.0.0.1:${ZMQ_PORT}"
-        else
-            ENABLE_ZMQ="N"
-            echo ""
-            print_info "ZMQ disabled - pool software will use RPC polling"
-        fi
+        case "$notif_choice" in
+            2)
+                ENABLE_ZMQ="Y"
+                ENABLE_BLOCKNOTIFY="N"
+                echo ""
+                print_success "ZMQ notifications enabled"
+                echo "  ZMQ endpoint: tcp://127.0.0.1:${ZMQ_PORT}"
+                echo ""
+                print_warning "If you experience issues, reconfigure with RPC polling."
+                ;;
+            3)
+                ENABLE_ZMQ="N"
+                ENABLE_BLOCKNOTIFY="Y"
+                echo ""
+                echo "Enter the command to run when a new block is found."
+                echo "The block hash will be appended as an argument."
+                echo ""
+                echo "Examples:"
+                echo "  curl -s http://localhost:8000/newblock/"
+                echo "  /opt/pool/notify.sh"
+                echo ""
+                echo -ne "${YELLOW}blocknotify command:${NC} "
+                read -r BLOCKNOTIFY_CMD
+                if [[ -z "$BLOCKNOTIFY_CMD" ]]; then
+                    BLOCKNOTIFY_CMD="echo %s >> /var/log/monero/newblocks.log"
+                fi
+                print_success "blocknotify configured"
+                ;;
+            4)
+                ENABLE_ZMQ="Y"
+                ENABLE_BLOCKNOTIFY="Y"
+                echo ""
+                print_success "Both ZMQ and blocknotify enabled"
+                echo "  ZMQ endpoint: tcp://127.0.0.1:${ZMQ_PORT}"
+                echo ""
+                echo -ne "${YELLOW}blocknotify command [default: log to file]:${NC} "
+                read -r BLOCKNOTIFY_CMD
+                if [[ -z "$BLOCKNOTIFY_CMD" ]]; then
+                    BLOCKNOTIFY_CMD="echo %s >> /var/log/monero/newblocks.log"
+                fi
+                ;;
+            *)
+                ENABLE_ZMQ="N"
+                ENABLE_BLOCKNOTIFY="N"
+                echo ""
+                print_success "Using RPC polling only (most compatible)"
+                echo "  Pool software will poll get_last_block_header for new work."
+                ;;
+        esac
         echo ""
     else
         print_subsection "RPC Access"
@@ -891,6 +1031,9 @@ show_configuration_summary() {
             echo -e "    ZMQ Port:         ${GREEN}${ZMQ_PORT} (enabled)${NC}"
         else
             echo -e "    ZMQ:              ${YELLOW}Disabled (RPC polling)${NC}"
+        fi
+        if [[ "$ENABLE_BLOCKNOTIFY" == "Y" ]]; then
+            echo -e "    blocknotify:      ${GREEN}Enabled${NC}"
         fi
     fi
     if [[ "$ENABLE_RPC_LOGIN" == "Y" ]]; then
@@ -1117,7 +1260,7 @@ EOF
             cat >> "$CONFIG_DIR/monerod.conf" << EOF
 
 #-------------------------------------------------------------------------------
-# ZMQ BLOCK NOTIFICATIONS
+# ZMQ BLOCK NOTIFICATIONS (ENABLED)
 # Pool software can subscribe for instant new block notifications
 #-------------------------------------------------------------------------------
 zmq-pub=tcp://127.0.0.1:${ZMQ_PORT}
@@ -1130,6 +1273,18 @@ EOF
 # Uncomment to enable - pool software will use RPC polling instead
 #-------------------------------------------------------------------------------
 # zmq-pub=tcp://127.0.0.1:${ZMQ_PORT}
+EOF
+        fi
+
+        # Add blocknotify if enabled
+        if [[ "$ENABLE_BLOCKNOTIFY" == "Y" ]] && [[ -n "$BLOCKNOTIFY_CMD" ]]; then
+            cat >> "$CONFIG_DIR/monerod.conf" << EOF
+
+#-------------------------------------------------------------------------------
+# BLOCK NOTIFY SCRIPT
+# Runs this command when a new block is found (%s = block hash)
+#-------------------------------------------------------------------------------
+block-notify=${BLOCKNOTIFY_CMD}
 EOF
         fi
 
@@ -1277,25 +1432,52 @@ EOF
             
             print_success "Pool wallet created"
             echo ""
-            echo -e "${RED}════════════════════════════════════════════════════════════════════${NC}"
-            echo -e "${RED}  IMPORTANT: SAVE YOUR SEED PHRASE!                                 ${NC}"
-            echo -e "${RED}════════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${RED}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║${NC}               ${BOLD}CRITICAL: SAVE YOUR SEED PHRASE!${NC}                       ${RED}║${NC}"
+            echo -e "${RED}╠══════════════════════════════════════════════════════════════════════╣${NC}"
+            echo -e "${RED}║${NC}                                                                      ${RED}║${NC}"
+            echo -e "${RED}║${NC}  Your seed phrase is the ONLY way to recover your wallet.            ${RED}║${NC}"
+            echo -e "${RED}║${NC}  If you lose it, your funds are GONE FOREVER.                        ${RED}║${NC}"
+            echo -e "${RED}║${NC}                                                                      ${RED}║${NC}"
+            echo -e "${RED}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}                         WALLET INFORMATION                            ${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
             echo -e "${YELLOW}Wallet Address:${NC}"
             echo "$wallet_address"
             echo ""
-            echo -e "${YELLOW}Wallet Password:${NC}"
+            echo -e "${YELLOW}Wallet Password (for local wallet file):${NC}"
             echo "$wallet_password"
             echo ""
-            echo -e "${YELLOW}Seed Phrase (WRITE THIS DOWN!):${NC}"
+            echo -e "${YELLOW}Seed Phrase (25 words):${NC}"
             echo "$wallet_seed"
             echo ""
-            echo -e "${RED}════════════════════════════════════════════════════════════════════${NC}"
-            echo -e "${RED}  Store this information securely! It's also saved in:              ${NC}"
-            echo -e "${RED}  ${CONFIG_DIR}/pool-wallet.conf                                    ${NC}"
-            echo -e "${RED}════════════════════════════════════════════════════════════════════${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}                         SECURITY WARNINGS                             ${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            echo "Press Enter to continue..."
+            echo -e "  ${RED}⚠${NC}  NEVER share your seed phrase with anyone"
+            echo -e "  ${RED}⚠${NC}  NEVER enter your seed phrase on any website"
+            echo -e "  ${RED}⚠${NC}  NEVER store seed phrase in digital form (email, cloud, etc.)"
+            echo ""
+            echo -e "  ${GREEN}✓${NC}  Write the seed phrase on paper and store securely"
+            echo -e "  ${GREEN}✓${NC}  Consider using a fireproof safe or safety deposit box"
+            echo -e "  ${GREEN}✓${NC}  Make multiple copies stored in different locations"
+            echo ""
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}                         WALLET RECOVERY                               ${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            echo "  To recover this wallet, use the official Monero GUI/CLI wallet:"
+            echo "    monero-wallet-cli --restore-deterministic-wallet"
+            echo "  Then enter your 25-word seed phrase when prompted."
+            echo ""
+            echo -e "${YELLOW}  Wallet info also saved in: ${CONFIG_DIR}/pool-wallet.conf${NC}"
+            echo -e "${YELLOW}  (readable only by root and monero user)${NC}"
+            echo ""
+            echo -e "${GREEN}Press Enter when you have safely recorded your seed phrase...${NC}"
             read -r
         else
             print_warning "Could not create wallet. You can create it manually later."
@@ -1623,6 +1805,12 @@ print_completion() {
             echo "  ZMQ:             Disabled (pool will use RPC polling)"
         fi
         
+        if [[ "$ENABLE_BLOCKNOTIFY" == "Y" ]]; then
+            echo ""
+            echo -e "  ${GREEN}blocknotify:${NC} Enabled"
+            echo "  Command: ${BLOCKNOTIFY_CMD}"
+        fi
+        
         if [[ -n "$POOL_WALLET_ADDRESS" ]]; then
             echo ""
             echo -e "${BOLD}Pool Wallet Address:${NC}"
@@ -1693,9 +1881,33 @@ print_completion() {
     echo ""
     
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${YELLOW}  IMPORTANT: Initial blockchain sync will take several hours to days   ${NC}"
-    echo -e "${YELLOW}  depending on your internet connection and disk speed.                ${NC}"
+    echo -e "${YELLOW}                        SYNC TIME ESTIMATES                            ${NC}"
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
+        echo "  Pruned Node (~65GB):"
+        echo "    • SSD + 1Gbps:   6-12 hours"
+        echo "    • SSD + 100Mbps: 12-24 hours"
+        echo "    • HDD:           3-7 days (not recommended)"
+    else
+        echo "  Full Node (~180GB):"
+        echo "    • SSD + 1Gbps:   12-24 hours"
+        echo "    • SSD + 100Mbps: 24-72 hours"
+        echo "    • HDD:           1-3 weeks (not recommended)"
+    fi
+    echo ""
+    echo "  Sync is I/O bound - SSD makes a MASSIVE difference!"
+    echo ""
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}                         PRIVACY OPTIONS                                ${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "  For enhanced privacy, consider running monerod over Tor."
+    echo "  See: https://www.getmonero.org/resources/user-guides/"
+    echo ""
+    echo "  Add to /etc/monero/monerod.conf:"
+    echo "    proxy=127.0.0.1:9050"
+    echo "    anonymous-inbound=YOUR_ONION_ADDRESS:18083,127.0.0.1:18083"
     echo ""
 }
 
@@ -1725,6 +1937,7 @@ main() {
     print_section "SYSTEM CHECKS"
     check_root
     check_debian
+    check_cpu
     check_memory
     
     # Check for existing installation and select mode

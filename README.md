@@ -112,6 +112,7 @@ sudo ./uninstall-monero.sh --force --quiet
 
 | Guide | Description |
 |-------|-------------|
+| [VM Requirements](docs/VM-REQUIREMENTS.md) | Hardware specs, cloud instances, SSD requirements |
 | [Mining Pool Setup](docs/MINING-POOL.md) | Pool-specific configuration and RPC methods |
 | [Wallet Management](docs/WALLET.md) | Wallet CLI, backups, security |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Common issues and fixes |

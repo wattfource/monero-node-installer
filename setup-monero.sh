@@ -69,7 +69,7 @@
 #===============================================================================
 
 # Script version - increment this with each release
-SCRIPT_VERSION="1.1.1"
+SCRIPT_VERSION="1.2.0"
 
 # GitHub repository for updates
 GITHUB_REPO="wattfource/monero-node-installer"
@@ -424,36 +424,58 @@ check_disk_space() {
     # Check storage type (SSD vs HDD)
     check_storage_type
     
-    local required_gb=280
-    local recommended_gb=400
+    # CRITICAL: These numbers are based on Dec 2024 blockchain size (~230GB full, ~95GB pruned)
+    # Growth rate: ~20GB/year. DO NOT reduce these numbers without updating blockchain size.
+    local required_gb=400
+    local recommended_gb=500
     if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
-        required_gb=120
-        recommended_gb=150
+        required_gb=150
+        recommended_gb=200
     fi
     
     if [[ $available_gb -lt $required_gb ]]; then
         echo ""
-        print_error "Insufficient disk space!"
+        echo -e "${RED}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║                    CRITICAL: INSUFFICIENT DISK SPACE                 ║${NC}"
+        echo -e "${RED}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
         if [[ "$BLOCKCHAIN_MODE" == "full" ]]; then
-            echo "         Full Monero blockchain requires ~230GB (as of Dec 2024)"
-            echo "         Plus ~50GB overhead for database, logs, and growth"
-            echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
-            echo "         Consider using a pruned node if space is limited"
+            echo -e "  ${YELLOW}Current available:${NC} ${available_gb}GB"
+            echo -e "  ${YELLOW}Required minimum:${NC}  ${RED}${required_gb}GB${NC}"
+            echo -e "  ${YELLOW}Recommended:${NC}       ${GREEN}${recommended_gb}GB${NC}"
+            echo ""
+            echo "  The Monero blockchain is ~230GB (Dec 2024) and grows ~20GB/year."
+            echo "  You need headroom for LMDB overhead, logs, and future growth."
+            echo ""
+            echo -e "  ${RED}Expanding VMs after the fact is painful. Provision correctly NOW.${NC}"
+            echo ""
+            echo "  Consider: Pruned node (150GB) or increase your VM disk."
         else
-            echo "         Pruned Monero blockchain requires ~95GB (as of Dec 2024)"
-            echo "         Plus ~25GB overhead for database and growth"
-            echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
+            echo -e "  ${YELLOW}Current available:${NC} ${available_gb}GB"
+            echo -e "  ${YELLOW}Required minimum:${NC}  ${RED}${required_gb}GB${NC}"
+            echo -e "  ${YELLOW}Recommended:${NC}       ${GREEN}${recommended_gb}GB${NC}"
+            echo ""
+            echo "  The pruned blockchain is ~95GB (Dec 2024) and grows ~10GB/year."
+            echo "  You need headroom for LMDB overhead, logs, and future growth."
+            echo ""
+            echo -e "  ${RED}Expanding VMs after the fact is painful. Provision correctly NOW.${NC}"
         fi
         echo ""
-        if ! prompt_yes_no "Continue anyway?" "N"; then
-            print_error "Setup aborted due to insufficient disk space"
+        if ! prompt_yes_no "I understand the risk - continue anyway?" "N"; then
+            print_error "Setup aborted - please resize your VM disk first"
             exit 1
         fi
+        echo ""
+        print_warning "Proceeding despite insufficient disk space - you have been warned!"
+        echo ""
     elif [[ $available_gb -lt $recommended_gb ]]; then
         echo ""
-        print_warning "Disk space is below recommended (${recommended_gb}GB)"
-        echo "         Current: ${available_gb}GB"
-        echo "         The blockchain grows ~20-30GB per year."
+        print_warning "Disk space is below recommended"
+        echo -e "         Current: ${YELLOW}${available_gb}GB${NC}"
+        echo -e "         Recommended: ${GREEN}${recommended_gb}GB${NC}"
+        echo "         The blockchain grows ~20GB per year."
+        echo ""
+        echo -e "         ${YELLOW}Consider resizing your VM disk now to avoid issues later.${NC}"
         echo ""
     fi
 }
@@ -638,6 +660,28 @@ show_introduction() {
     
     echo "This wizard will guide you through setting up a Monero node."
     echo ""
+    
+    # CRITICAL STORAGE WARNING - SHOWN BEFORE ANYTHING ELSE
+    echo -e "${RED}╔══════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║              ⚠️  CRITICAL: READ BEFORE CONTINUING  ⚠️                ║${NC}"
+    echo -e "${RED}╠══════════════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${RED}║                                                                      ║${NC}"
+    echo -e "${RED}║  STORAGE REQUIREMENTS (Dec 2024):                                    ║${NC}"
+    echo -e "${RED}║                                                                      ║${NC}"
+    echo -e "${RED}║    Full Node:   400GB MINIMUM  (500GB recommended)                   ║${NC}"
+    echo -e "${RED}║    Pruned Node: 150GB MINIMUM  (200GB recommended)                   ║${NC}"
+    echo -e "${RED}║                                                                      ║${NC}"
+    echo -e "${RED}║  The blockchain is ~230GB and grows ~20GB/year.                      ║${NC}"
+    echo -e "${RED}║  Expanding VMs later is PAINFUL. Provision correctly NOW.            ║${NC}"
+    echo -e "${RED}║                                                                      ║${NC}"
+    echo -e "${RED}╚══════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Show current disk space so they know immediately
+    local available_gb=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    echo -e "  Your current available disk space: ${YELLOW}${available_gb}GB${NC}"
+    echo ""
+    
     echo "You will be asked to make the following decisions:"
     echo ""
     echo -e "  ${BOLD}1. Node Type${NC}"
@@ -645,8 +689,8 @@ show_introduction() {
     echo "     • Mining Pool Node - Optimized backend for mining pool software"
     echo ""
     echo -e "  ${BOLD}2. Blockchain Mode${NC}"
-    echo "     • Full Node (~230GB) - Complete blockchain, maximum security"
-    echo "     • Pruned Node (~95GB) - Reduced storage, still validates all blocks"
+    echo "     • Full Node (~230GB) - Requires 400GB+ disk"
+    echo "     • Pruned Node (~95GB) - Requires 150GB+ disk"
     echo ""
     echo -e "  ${BOLD}3. Directory Paths${NC}"
     echo "     • Where to install binaries"

@@ -2,16 +2,22 @@
 
 Detailed hardware requirements for running a Monero node.
 
+## ⚠️ CRITICAL: Provision Storage Correctly
+
+> **Expanding VMs after setup is painful.** Get this right the first time.
+
 ## Quick Reference
 
-| Resource | Minimum | Recommended | Long-term (5+ years) |
-|----------|---------|-------------|----------------------|
-| RAM | 4GB | 8GB | 8GB |
-| Disk (Full) | 280GB SSD | 400GB NVMe/SSD | 500GB NVMe/SSD |
-| Disk (Pruned) | 120GB SSD | 150GB NVMe/SSD | 200GB NVMe/SSD |
-| CPU | 2 cores | 4 cores | 4 cores |
-| Network | 100Mbps | 1Gbps | 1Gbps |
+| Resource | **MINIMUM** | Recommended | Notes |
+|----------|-------------|-------------|-------|
+| RAM | 4GB | 8GB | More helps during sync |
+| **Disk (Full)** | **400GB SSD** | **500GB NVMe** | Blockchain is ~230GB, grows 20GB/yr |
+| **Disk (Pruned)** | **150GB SSD** | **200GB NVMe** | Blockchain is ~95GB, grows 10GB/yr |
+| CPU | 2 cores | 4 cores | More helps during sync |
+| Network | 100Mbps | 1Gbps | |
 | OS | Debian 13 (Trixie) | | |
+
+> **Storage is cheap. Your time is not. When in doubt, go bigger.**
 
 ## Storage Requirements (Updated Dec 2024)
 
@@ -71,22 +77,29 @@ Mining pool nodes have specific I/O requirements:
 ```
 Years of headroom = (Your Storage - Current Blockchain) / 20GB per year
 
-Examples:
-- 300GB: (300 - 230) / 20 = 3.5 years ⚠️
-- 400GB: (400 - 230) / 20 = 8.5 years ✅
-- 500GB: (500 - 230) / 20 = 13.5 years ✅
+Examples (Full Node, Dec 2024):
+- 300GB: (300 - 230) / 20 = 3.5 years ❌ TOO SMALL - don't do this
+- 400GB: (400 - 230) / 20 = 8.5 years ✅ MINIMUM
+- 500GB: (500 - 230) / 20 = 13.5 years ✅ RECOMMENDED
+
+Examples (Pruned Node, Dec 2024):
+- 120GB: (120 - 95) / 10 = 2.5 years ❌ TOO SMALL
+- 150GB: (150 - 95) / 10 = 5.5 years ✅ MINIMUM
+- 200GB: (200 - 95) / 10 = 10.5 years ✅ RECOMMENDED
 ```
 
 **Recommendation by deployment type:**
 
-| Deployment | Recommended | Rationale |
-|------------|-------------|-----------|
-| Testing/Learning | 300GB | Adequate, can expand later |
-| Personal Node | 400GB | 8+ years, good balance |
-| Mining Pool | 400-500GB | Critical uptime, don't risk running low |
-| Set-and-forget | 500GB | Maximum peace of mind |
+| Deployment | Full Node | Pruned Node | Rationale |
+|------------|-----------|-------------|-----------|
+| Testing/Learning | 400GB | 150GB | Minimum viable |
+| Personal Node | 500GB | 200GB | Comfortable headroom |
+| **Mining Pool** | **500GB** | **200GB** | **Critical uptime** |
+| Set-and-forget | 500GB+ | 200GB+ | Maximum peace of mind |
 
-> **Tip**: If using cloud providers with easy resize (Hetzner, Vultr, etc.), start with 300GB and expand when needed. For self-hosted VMs where resizing is painful, provision 400GB+ upfront.
+> ⚠️ **NEVER provision less than 400GB for full or 150GB for pruned.**
+>
+> Expanding VMs is painful. Storage is cheap. Just do it right the first time.
 
 ## Memory Usage
 

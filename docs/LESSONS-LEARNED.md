@@ -33,6 +33,51 @@ Build an interactive setup script for deploying Monero nodes on Debian 13 VMs ru
 
 ## Technical Lessons
 
+### 0. STORAGE REQUIREMENTS - THE MOST IMPORTANT LESSON
+
+> **THIS IS THE SINGLE MOST CRITICAL LESSON IN THIS DOCUMENT.**
+
+**What happened:** We initially documented storage requirements as "220GB minimum, 300GB recommended" for full nodes. This was **catastrophically wrong**. The actual blockchain is ~230GB (Dec 2024), meaning 220GB minimum was already impossible, and 300GB gave only ~3 years of headroom.
+
+**The consequences:**
+- VM created with insufficient storage
+- Discovered the error mid-sync after hours of downloading
+- Had to expand VM disk (which is a painful process)
+- Wasted significant time and effort
+
+**The correct numbers (Dec 2024):**
+
+| Mode | Blockchain | MINIMUM Disk | Recommended |
+|------|------------|--------------|-------------|
+| Full | ~230GB | **400GB** | 500GB |
+| Pruned | ~95GB | **150GB** | 200GB |
+
+**Why these numbers:**
+- Blockchain: ~230GB now, grows ~20GB/year
+- LMDB overhead: Can temporarily use 1.5x during compaction
+- Logs/temp: ~5GB
+- Growth headroom: At least 5 years (100GB)
+- **400GB gives 8+ years of headroom**
+
+**Rules for future documentation:**
+1. **NEVER recommend minimum = blockchain size.** That's already too late.
+2. **Always add 50% buffer PLUS 5 years of growth.**
+3. **Storage is cheap. Developer time is not.**
+4. **If someone asks "is X enough?", the answer is "go bigger."**
+5. **Update these numbers every 6 months** - blockchain size changes.
+
+**Calculation formula:**
+```
+Recommended = (Current Blockchain × 1.5) + (Years of headroom × Growth rate)
+
+Example for Full Node:
+  = (230GB × 1.5) + (8 years × 20GB/year)
+  = 345GB + 160GB
+  = 505GB → Round to 500GB
+```
+
+---
+
 ### 1. Monero Uses Pre-Built Binaries (Not Source Compilation)
 
 Unlike Litecoin which requires compiling from source with Berkeley DB 4.8, Monero provides official pre-built binaries:
@@ -107,14 +152,18 @@ echo -e "${password}\n${password}\n0\n" | monero-wallet-cli --generate-new-walle
 
 **Lesson:** Interactive CLI tools often don't support `--command` during generation flows. Use stdin piping instead.
 
-### 5. Blockchain Storage Requirements
+### 5. Blockchain Storage Requirements (Updated Dec 2024)
 
-| Mode | Disk Space | Use Case |
-|------|------------|----------|
-| Full | ~180GB | Block explorers, archival |
-| Pruned | ~65GB | Mining pools, most use cases |
+| Mode | Blockchain Size | Disk You Need | Use Case |
+|------|-----------------|---------------|----------|
+| Full | ~230GB | **400GB minimum** | Block explorers, archival |
+| Pruned | ~95GB | **150GB minimum** | Mining pools, most use cases |
 
-**Insight:** Pruned nodes still validate ALL blocks - they just don't store old transaction data. This provides the same security level with 65% less storage.
+**Insight:** Pruned nodes still validate ALL blocks - they just don't store old transaction data. This provides the same security level with ~60% less storage.
+
+**Growth rate:** ~20GB/year for full, ~10GB/year for pruned.
+
+> **See Lesson #0 above for detailed storage calculations. DO NOT SKIMP ON DISK SPACE.**
 
 ### 6. Port Forwarding Requirements
 

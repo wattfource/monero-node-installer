@@ -2,15 +2,31 @@
 
 Interactive setup script for deploying Monero nodes on Debian 13, supporting both personal use and mining pool backends.
 
+## ⚠️ CRITICAL: Storage Requirements
+
+> **DO NOT SKIMP ON DISK SPACE.** The Monero blockchain is **~230GB** as of Dec 2024 and grows **~20GB/year**.
+> Expanding VMs after the fact is painful. Provision correctly the first time.
+
+| Mode | Blockchain Size | **YOU NEED** | Why |
+|------|-----------------|--------------|-----|
+| **Full Node** | ~230GB | **400GB minimum** | Gives 8+ years headroom |
+| **Pruned Node** | ~95GB | **150GB minimum** | Gives 5+ years headroom |
+
+**If in doubt: 500GB for full, 200GB for pruned.** Storage is cheap. Your time is not.
+
 ## Requirements
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
 | RAM | 4GB | 8GB |
-| Disk (Full) | 220GB | 300GB |
-| Disk (Pruned) | 80GB | 120GB |
+| **Disk (Full)** | **400GB SSD** | **500GB NVMe** |
+| **Disk (Pruned)** | **150GB SSD** | **200GB NVMe** |
 | CPU | 2 cores | 4 cores |
 | OS | Debian 13 (Trixie) | |
+
+> ⚠️ **SSD is required.** HDD sync takes weeks and performs poorly for pools.
+>
+> ⚠️ **Do not provision less than the minimum.** Expanding VMs mid-sync is painful.
 
 ## Quick Start
 
@@ -35,7 +51,7 @@ The interactive wizard guides you through:
 | Step | Options |
 |------|---------|
 | **Node Type** | Standard (personal) or Mining Pool Backend |
-| **Blockchain** | Full (~180GB) or Pruned (~65GB) |
+| **Blockchain** | Full (~230GB) or Pruned (~95GB) |
 | **Network** | RPC binding, firewall rules |
 | **Pool Wallet** | Create new or use existing (pool mode) |
 

@@ -25,7 +25,7 @@
 #       - Debian 13 (Trixie) or compatible Debian-based system
 #       - Root/sudo access
 #       - Minimum 4GB RAM (8GB recommended)
-#       - Minimum 220GB disk space for full node (65GB for pruned)
+#       - Minimum 280GB disk space for full node (120GB for pruned)
 #       - Internet connection for downloading Monero binaries
 #
 #   NODE TYPES:
@@ -33,8 +33,8 @@
 #       - Mining Pool Node: Optimized backend for mining pool software
 #
 #   BLOCKCHAIN MODES:
-#       - Full Node: Complete blockchain (~180GB), maximum security
-#       - Pruned Node: Reduced blockchain (~65GB), still validates all blocks
+#       - Full Node: Complete blockchain (~230GB), maximum security
+#       - Pruned Node: Reduced blockchain (~95GB), still validates all blocks
 #
 #   CONFIGURATION FILES:
 #       - /etc/monero/monerod.conf     - Main daemon configuration
@@ -69,7 +69,7 @@
 #===============================================================================
 
 # Script version - increment this with each release
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.1.1"
 
 # GitHub repository for updates
 GITHUB_REPO="wattfource/monero-node-installer"
@@ -424,24 +424,24 @@ check_disk_space() {
     # Check storage type (SSD vs HDD)
     check_storage_type
     
-    local required_gb=220
-    local recommended_gb=300
+    local required_gb=280
+    local recommended_gb=400
     if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
-        required_gb=80
-        recommended_gb=120
+        required_gb=120
+        recommended_gb=150
     fi
     
     if [[ $available_gb -lt $required_gb ]]; then
         echo ""
         print_error "Insufficient disk space!"
         if [[ "$BLOCKCHAIN_MODE" == "full" ]]; then
-            echo "         Full Monero blockchain requires ~180GB"
-            echo "         Plus ~40GB overhead for database, logs, and growth"
+            echo "         Full Monero blockchain requires ~230GB (as of Dec 2024)"
+            echo "         Plus ~50GB overhead for database, logs, and growth"
             echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
             echo "         Consider using a pruned node if space is limited"
         else
-            echo "         Pruned Monero blockchain requires ~65GB"
-            echo "         Plus ~15GB overhead for database and growth"
+            echo "         Pruned Monero blockchain requires ~95GB (as of Dec 2024)"
+            echo "         Plus ~25GB overhead for database and growth"
             echo "         Minimum: ${required_gb}GB | Recommended: ${recommended_gb}GB"
         fi
         echo ""
@@ -645,8 +645,8 @@ show_introduction() {
     echo "     • Mining Pool Node - Optimized backend for mining pool software"
     echo ""
     echo -e "  ${BOLD}2. Blockchain Mode${NC}"
-    echo "     • Full Node (~180GB) - Complete blockchain, maximum security"
-    echo "     • Pruned Node (~65GB) - Reduced storage, still validates all blocks"
+    echo "     • Full Node (~230GB) - Complete blockchain, maximum security"
+    echo "     • Pruned Node (~95GB) - Reduced storage, still validates all blocks"
     echo ""
     echo -e "  ${BOLD}3. Directory Paths${NC}"
     echo "     • Where to install binaries"
@@ -720,7 +720,7 @@ configure_blockchain_mode() {
     echo "How much blockchain data should be stored?"
     echo ""
     echo -e "┌─────────────────────────────────────────────────────────────────────┐"
-    echo -e "│  ${CYAN}[1]${NC} ${BOLD}FULL NODE${NC}  (~180GB disk space)                                  │"
+    echo -e "│  ${CYAN}[1]${NC} ${BOLD}FULL NODE${NC}  (~230GB disk space)                                  │"
     echo -e "│                                                                     │"
     echo -e "│      • Stores complete blockchain history                           │"
     echo -e "│      • Maximum security and decentralization                        │"
@@ -729,7 +729,7 @@ configure_blockchain_mode() {
     echo -e "└─────────────────────────────────────────────────────────────────────┘"
     echo ""
     echo -e "┌─────────────────────────────────────────────────────────────────────┐"
-    echo -e "│  ${CYAN}[2]${NC} ${BOLD}PRUNED NODE${NC}  (~65GB disk space)                                 │"
+    echo -e "│  ${CYAN}[2]${NC} ${BOLD}PRUNED NODE${NC}  (~95GB disk space)                                 │"
     echo -e "│                                                                     │"
     echo -e "│      • Stores only recent blockchain data                           │"
     echo -e "│      • Still validates ALL blocks (same security!)                  │"
@@ -743,11 +743,11 @@ configure_blockchain_mode() {
     if [[ "$choice" == "2" ]]; then
         BLOCKCHAIN_MODE="pruned"
         echo ""
-        print_success "Selected: Pruned Node (~65GB)"
+        print_success "Selected: Pruned Node (~95GB)"
     else
         BLOCKCHAIN_MODE="full"
         echo ""
-        print_success "Selected: Full Node (~180GB)"
+        print_success "Selected: Full Node (~230GB)"
     fi
 }
 
@@ -1058,9 +1058,9 @@ show_configuration_summary() {
     echo ""
     
     if [[ "$BLOCKCHAIN_MODE" == "full" ]]; then
-        echo -e "  ${YELLOW}Disk space required: ~180GB${NC}"
+        echo -e "  ${YELLOW}Disk space required: ~230GB (recommend 400GB for growth)${NC}"
     else
-        echo -e "  ${YELLOW}Disk space required: ~65GB${NC}"
+        echo -e "  ${YELLOW}Disk space required: ~95GB (recommend 150GB for growth)${NC}"
     fi
     echo ""
     
@@ -1343,12 +1343,12 @@ EOF
 EOF
     if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
         cat >> "$CONFIG_DIR/monerod.conf" << EOF
-# Pruned node - stores only recent blockchain data (~65GB)
+# Pruned node - stores only recent blockchain data (~95GB, grows ~10GB/year)
 prune-blockchain=1
 EOF
     else
         cat >> "$CONFIG_DIR/monerod.conf" << EOF
-# Full node - stores complete blockchain (~180GB)
+# Full node - stores complete blockchain (~230GB, grows ~20GB/year)
 prune-blockchain=0
 EOF
     fi
@@ -1885,12 +1885,12 @@ print_completion() {
     echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     if [[ "$BLOCKCHAIN_MODE" == "pruned" ]]; then
-        echo "  Pruned Node (~65GB):"
+        echo "  Pruned Node (~95GB):"
         echo "    • SSD + 1Gbps:   6-12 hours"
         echo "    • SSD + 100Mbps: 12-24 hours"
         echo "    • HDD:           3-7 days (not recommended)"
     else
-        echo "  Full Node (~180GB):"
+        echo "  Full Node (~230GB):"
         echo "    • SSD + 1Gbps:   12-24 hours"
         echo "    • SSD + 100Mbps: 24-72 hours"
         echo "    • HDD:           1-3 weeks (not recommended)"

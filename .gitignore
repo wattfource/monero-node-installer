@@ -1,0 +1,28 @@
+# Secrets - NEVER commit these
+config.md
+secrets
+secrets.txt
+secrets.md
+*.secret
+*.secrets
+
+# Wallet files
+*.keys
+*.wallet
+pool-wallet.conf
+
+# Environment files
+.env
+.env.*
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
